@@ -1,0 +1,58 @@
+name: Weekly Cineville Amsterdam program
+
+on:
+  schedule:
+    # Tuesday 12:00 Europe/Amsterdam, split into two cron lines because
+    # GitHub Actions cron runs in UTC and Amsterdam alternates between
+    # CET (UTC+1) and CEST (UTC+2). This is a ~1-week-either-side
+    # approximation around the actual DST changeover dates -- see README.
+    - cron: "0 10 * 3-10 2"   # CEST months (roughly late Mar - late Oct): 10:00 UTC = 12:00 CEST
+    - cron: "0 11 * 1,2,11,12 2"  # CET months (roughly late Oct - late Mar): 11:00 UTC = 12:00 CET
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Fetch program and build page
+        run: python scripts/fetch_program.py
+
+      - name: Commit updated docs/ and data/
+        run: |
+          git config user.name "cineville-tracker-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/index.html data/latest.json
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Weekly program update"
+          git push
+
+      - name: Set up GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload docs/ as Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
