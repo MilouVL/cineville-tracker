@@ -41,17 +41,41 @@ jobs:
         run: |
           git config user.name "cineville-tracker-bot"
           git config user.email "actions@users.noreply.github.com"
+
+          # docs/index.html and data/latest.json are fully REGENERATED every
+          # run (not incrementally edited), so a rebase/merge against a
+          # newer origin/main will almost always hit a content conflict --
+          # even just the "generated at" timestamp line differs between any
+          # two runs. There's nothing meaningful to merge for these two
+          # files: this run's freshly-scraped content should simply win
+          # outright. So instead of merging, this commits our generated
+          # files, and if the push is rejected as non-fast-forward (e.g.
+          # another run or a manual push landed on main first), it moves
+          # our commit onto the new tip via `git reset --mixed origin/main`
+          # (which re-points the branch at the latest main and syncs the
+          # index to it, without touching the working tree) and recommits
+          # our same generated file content on top -- retried up to 5 times
+          # to absorb any amount of racing. `--mixed` (not `--soft`) is what
+          # makes this safe: it means any OTHER file that changed on main
+          # in the meantime (e.g. a script edit you pushed) is correctly
+          # picked up rather than accidentally reverted by the retry.
           git add docs/index.html data/latest.json
-          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Weekly program update"
-          # Pull in anything pushed to main since this job's checkout (e.g. a
-          # manual push you made while the run was in progress) before
-          # pushing, so this can't get rejected as a non-fast-forward. Since
-          # this step only ever touches docs/index.html and data/latest.json,
-          # a rebase here should always be conflict-free against changes made
-          # anywhere else in the repo (e.g. scripts/, README.md).
-          git fetch origin main
-          git rebase origin/main
-          git push
+
+          for attempt in 1 2 3 4 5; do
+            if git diff --cached --quiet; then
+              echo "No changes to commit"
+              break
+            fi
+            git commit -m "Weekly program update"
+            if git push; then
+              echo "Pushed successfully"
+              break
+            fi
+            echo "Push rejected (attempt $attempt) -- rebasing our generated content onto the latest main and retrying"
+            git fetch origin main
+            git reset --mixed origin/main
+            git add docs/index.html data/latest.json
+          done
 
       - name: Set up GitHub Pages
         uses: actions/configure-pages@v5
