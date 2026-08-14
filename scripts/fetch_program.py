@@ -88,22 +88,33 @@ DUTCH_MONTHS = {
 }
 
 # A "day field" is a run of HH:MM tokens and/or literal "..." placeholders
-# (filmladder shows "..." for a day with no showing). Matching it as a
-# strict token pattern -- rather than a lazy generic ".*?" -- is what keeps
-# entries with no star-rating from swallowing the following entry's times.
+# (filmladder shows "..." for a day with no showing).
 _TIME_FIELD = r"(?:(?:\d{1,2}:\d{2}|\.\.\.)\s*)*"
 
-FILM_ENTRY_RE = re.compile(
-    r"\s*(?:(?P<rating>\d\.\d)★\s+)?(?P<title>.+?)\s+"
-    r"vandaag\s+do\s+(?P<do>" + _TIME_FIELD + r")\s*"
-    r"morgen\s+vr\s+(?P<vr>" + _TIME_FIELD + r")\s*"
-    r"zaterdag\s+za\s+(?P<za>" + _TIME_FIELD + r")\s*"
-    r"zondag\s+zo\s+(?P<zo>" + _TIME_FIELD + r")\s*"
-    r"maandag\s+ma\s+(?P<ma>" + _TIME_FIELD + r")\s*"
-    r"dinsdag\s+di\s+(?P<di>" + _TIME_FIELD + r")\s*"
-    r"woensdag\s+wo\s+(?P<wo>" + _TIME_FIELD + r")",
-    re.S,
+# IMPORTANT: filmladder.nl's 7 day-columns are labelled with a *rotating*
+# pair of (relative-or-absolute Dutch day word, 2-letter weekday
+# abbreviation) -- e.g. on a page fetched on a Thursday the columns read
+# "vandaag do, morgen vr, zaterdag za, zondag zo, maandag ma, dinsdag di,
+# woensdag wo", but fetched on a Friday they read "vandaag vr, morgen za,
+# zondag zo, maandag ma, dinsdag di, woensdag wo, donderdag do" instead --
+# "zaterdag" drops out and "donderdag" appears, because the Dutch word is
+# always relative-then-absolute-going-forward from whatever day it is when
+# the page loads. The word itself is therefore NOT a reliable anchor for a
+# regex run on a schedule (this broke the tracker the first time it ran on
+# a non-Thursday). The 2-letter abbreviation (do/vr/za/zo/ma/di/wo) is
+# always reliable -- it always means Thu/Fri/Sat/Sun/Mon/Tue/Wed regardless
+# of which Dutch word precedes it or what order the 7 columns come in -- so
+# that's what parsing keys off instead.
+_RELATIVE_DAY_WORD = (
+    r"(?:vandaag|morgen|zaterdag|zondag|maandag|dinsdag|woensdag|donderdag)"
 )
+
+ONE_DAY_FIELD_RE = re.compile(
+    _RELATIVE_DAY_WORD + r"\s+(?P<abbr>do|vr|za|zo|ma|di|wo)\s+"
+    r"(?P<times>" + _TIME_FIELD + r")"
+)
+
+RATING_RE = re.compile(r"(\d\.\d)★\s*(.*)$", re.S)
 
 TIME_TOKEN_RE = re.compile(r"\d{1,2}:\d{2}")
 
@@ -152,22 +163,35 @@ def split_into_cinema_blocks(full_text: str) -> dict:
 
 def parse_cinema_block(block_text: str) -> list:
     """Extract film entries (title, rating, per-day times) from one cinema's
-    block of flattened text."""
+    block of flattened text. Each film always has exactly 7 consecutive
+    day-fields (see ONE_DAY_FIELD_RE), so day-fields are found first and
+    grouped into runs of 7; the title/rating for each run is whatever text
+    sits between the end of the previous run and the start of this one."""
+    day_matches = list(ONE_DAY_FIELD_RE.finditer(block_text))
+    usable = len(day_matches) - (len(day_matches) % 7)
+
     entries = []
-    for m in FILM_ENTRY_RE.finditer(block_text):
-        title = m.group("title").strip(" -·")
+    prev_end = 0
+    for i in range(0, usable, 7):
+        group = day_matches[i:i + 7]
+        gap_text = block_text[prev_end:group[0].start()]
+        prev_end = group[-1].end()
+
+        rating_match = RATING_RE.search(gap_text)
+        if rating_match:
+            rating, title = rating_match.group(1), rating_match.group(2)
+        else:
+            rating, title = None, gap_text
+        title = title.strip(" -·")
         if not title or len(title) > 120:
             continue
+
         days = {}
-        for label, key in zip(DAY_LABELS, ["do", "vr", "za", "zo", "ma", "di", "wo"]):
-            raw = m.group(key)
-            times = TIME_TOKEN_RE.findall(raw)
-            days[label] = times
-        entries.append({
-            "title": title,
-            "rating": m.group("rating"),
-            "days": days,
-        })
+        for field_match in group:
+            days[field_match.group("abbr")] = TIME_TOKEN_RE.findall(
+                field_match.group("times")
+            )
+        entries.append({"title": title, "rating": rating, "days": days})
     return entries
 
 
@@ -236,58 +260,58 @@ def get_upcoming_releases(weeks_ahead: int = 3, today: datetime.date = None) -> 
 
     soup = BeautifulSoup(fetch(VERWACHT_URL), "html.parser")
 
-    # Find the "Verwachte films" heading, then walk siblings collecting
-    # week-range headings and the <ul> of films under each, until we hit the
-    # footer navigation section.
-    main_heading = None
-    for tag in soup.find_all(["h1", "h2"]):
-        if "verwachte films" in tag.get_text(strip=True).lower():
-            main_heading = tag
-            break
-
+    # Walk every tag in DOCUMENT ORDER (not just direct siblings of the
+    # "Verwachte films" heading) so this still works if the site wraps
+    # headings/lists in extra container divs -- a sibling-only walk breaks
+    # the moment a wrapper element is inserted between them, which is a
+    # common source of silent zero-results bugs on scraped sites.
     results = []
-    if main_heading is None:
-        return results
-
+    seen_main_heading = False
     current_week_label = None
     current_week_start = None
+    STOP_MARKERS = ("steden met bioscopen", "filmladder missie", "\u00a9 filmladder")
 
-    node = main_heading.find_next_sibling()
-    while node is not None:
-        node_text = node.get_text(" ", strip=True)
+    for tag in soup.find_all(True):
+        if tag.name not in ("h1", "h2", "h3", "h4", "p", "strong", "li"):
+            continue
+        text = tag.get_text(" ", strip=True)
+        if not text:
+            continue
+        low = text.lower()
 
-        if node.name in ("h2", "h3", "p", "strong") and WEEK_HEADER_RE.search(node_text):
-            m = WEEK_HEADER_RE.search(node_text)
-            d1, mon1, d2, mon2 = m.groups()
-            start_date = parse_dutch_date(d1, mon1, today.year)
-            # handle year rollover (e.g. Dec -> Jan week straddling new year)
-            if start_date and start_date < today - datetime.timedelta(days=200):
-                start_date = parse_dutch_date(d1, mon1, today.year + 1)
-            current_week_label = node_text
-            current_week_start = start_date
+        if not seen_main_heading:
+            if tag.name in ("h1", "h2") and "verwachte films" in low:
+                seen_main_heading = True
+            continue
 
-        elif node.name == "ul" and current_week_start is not None:
-            if current_week_start > cutoff:
-                break
-            for li in node.find_all("li"):
-                a = li.find("a")
-                if not a:
-                    continue
-                title = a.get("title") or a.get_text(strip=True)
-                li_text = li.get_text(" ", strip=True)
-                amsterdam_mentioned = "amsterdam" in li_text.lower()
-                results.append({
-                    "title": title,
-                    "week_label": current_week_label,
-                    "week_start": current_week_start.isoformat(),
-                    "amsterdam_confirmed": amsterdam_mentioned,
-                })
-
-        # Stop once we clearly leave the "verwacht" listing section.
-        if node.name == "h2" and "steden met bioscopen" in node_text.lower():
+        if any(marker in low for marker in STOP_MARKERS):
             break
 
-        node = node.find_next_sibling()
+        if tag.name in ("h1", "h2", "h3", "h4", "p", "strong"):
+            m = WEEK_HEADER_RE.search(text)
+            if m:
+                d1, mon1, d2, mon2 = m.groups()
+                start_date = parse_dutch_date(d1, mon1, today.year)
+                # handle year rollover (e.g. Dec -> Jan week straddling new year)
+                if start_date and start_date < today - datetime.timedelta(days=200):
+                    start_date = parse_dutch_date(d1, mon1, today.year + 1)
+                current_week_label = text
+                current_week_start = start_date
+            continue
+
+        if tag.name == "li" and current_week_start is not None:
+            if current_week_start > cutoff:
+                continue
+            a = tag.find("a")
+            if not a:
+                continue
+            title = a.get("title") or a.get_text(strip=True)
+            results.append({
+                "title": title,
+                "week_label": current_week_label,
+                "week_start": current_week_start.isoformat(),
+                "amsterdam_confirmed": "amsterdam" in low,
+            })
 
     return results
 

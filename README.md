@@ -71,6 +71,16 @@ updated `docs/index.html` and `data/latest.json`, and redeploys the site.
   publicly. filmladder.nl's page layout could change at any point, which
   would break the parsing. If the page ever comes back mostly empty, that's
   the most likely cause — see "If it breaks" below.
+- **The day-columns are keyed off the 2-letter weekday abbreviation
+  (do/vr/za/zo/ma/di/wo), not the Dutch word next to it.** filmladder.nl
+  labels the 7 day-columns with a rotating mix of relative words
+  ("vandaag"/"morgen") and absolute weekday names depending on what day the
+  page happens to load — e.g. fetched on a Thursday the columns read
+  "vandaag do, morgen vr, zaterdag za, ...", but fetched on a Friday they
+  read "vandaag vr, morgen za, zondag zo, ..." instead. (This broke the
+  tracker the first time it ran on a day other than Thursday — every cell
+  showed "no listings" — before the parser was changed to key off the
+  reliable 2-letter abbreviation instead of the rotating Dutch word.)
 - **The schedule is a DST approximation.** GitHub Actions cron runs in UTC,
   and Amsterdam shifts between UTC+1 (winter) and UTC+2 (summer). The
   workflow uses two cron lines split roughly at the DST changeover months,
