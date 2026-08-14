@@ -11,8 +11,10 @@ The Movies, EYE Filmmuseum, Studio/K.
 
 **Page layout:** new releases (with a Rotten Tomatoes search link for each)
 are listed first, then what's announced for the next 3 weeks, then the full
-program as a table with one row per day (Monday → Sunday) and one column
-per cinema, each cell showing exact start times.
+program as a table with one column per cinema. Each day gets its own
+labeled section (e.g. "Monday, 17 August") with three rows underneath —
+Morning (before 12:00), Afternoon (12:00–18:00), and Evening (after
+18:00) — each showing exact start times.
 
 **Data source:** [filmladder.nl](https://www.filmladder.nl) — Cineville
 doesn't publish a public API, and filmladder.nl is the most consistent single
@@ -100,6 +102,11 @@ updated `docs/index.html` and `data/latest.json`, and redeploys the site.
   consistent enough to construct reliably, so each new release links to
   `rottentomatoes.com/search?search=<title>` instead — one click from the
   real page, and it won't ever 404 the way a guessed direct link could.
+- **Calendar dates are computed, not scraped.** filmladder.nl's day columns
+  never state an actual date, only a weekday abbreviation, so each date
+  shown (e.g. "Monday, 17 August") is calculated from the run date assuming
+  the current Thu–Wed "speelweek" — this is reliable under the standard
+  cycle but would be off if a cinema ever ran an irregular-length week.
 - **New-release highlighting** is based on filmladder's site-wide premiere
   list, then matched against each cinema's own listings — a title has to
   match exactly, so a minor formatting difference (e.g. a subtitle or

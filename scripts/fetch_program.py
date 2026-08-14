@@ -79,6 +79,42 @@ DISPLAY_DAY_ORDER = [
     ("zo", "Sunday"),
 ]
 
+# Offset (in days) of each weekday abbreviation from the Thursday that
+# starts the current "speelweek" -- used to attach an actual calendar date
+# to each day column (do/vr/za/zo/ma/di/wo always mean Thu/Fri/Sat/Sun/
+# Mon/Tue/Wed of THIS programming week, regardless of what day the site
+# happened to label them with -- see the note on ONE_DAY_FIELD_RE below).
+_WEEKDAY_OFFSET_FROM_THURSDAY = {
+    "do": 0, "vr": 1, "za": 2, "zo": 3, "ma": 4, "di": 5, "wo": 6,
+}
+
+# Time-of-day buckets a showing's start time is sorted into.
+# (bucket_key, label, start_hour_inclusive, end_hour_exclusive)
+TIME_PERIODS = [
+    ("morning", "Morning", 0, 12),
+    ("afternoon", "Afternoon", 12, 18),
+    ("evening", "Evening", 18, 24),
+]
+
+
+def compute_day_dates(today: datetime.date) -> dict:
+    """Map each weekday abbreviation to its actual calendar date within the
+    current Thu-Wed programming week that contains `today`."""
+    days_since_thursday = (today.weekday() - 3) % 7  # Mon=0 ... Thu=3 ... Sun=6
+    this_weeks_thursday = today - datetime.timedelta(days=days_since_thursday)
+    return {
+        abbr: this_weeks_thursday + datetime.timedelta(days=offset)
+        for abbr, offset in _WEEKDAY_OFFSET_FROM_THURSDAY.items()
+    }
+
+
+def period_of(time_str: str) -> str:
+    hour = int(time_str.split(":")[0])
+    for key, _label, start, end in TIME_PERIODS:
+        if start <= hour < end:
+            return key
+    return "evening"  # fallback for any out-of-range/odd timestamp
+
 ROTTEN_TOMATOES_SEARCH_URL = "https://www.rottentomatoes.com/search?search={query}"
 
 DUTCH_MONTHS = {
@@ -343,9 +379,13 @@ def build_day_grid(program: dict) -> dict:
     return grid
 
 
-def render_html(program: dict, new_releases: list, upcoming: list, generated_at: str) -> str:
+def render_html(program: dict, new_releases: list, upcoming: list, generated_at: str,
+                 today: datetime.date = None) -> str:
+    if today is None:
+        today = datetime.date.today()
     new_releases_lower = {t.lower() for t in new_releases}
     day_grid = build_day_grid(program)
+    day_dates = compute_day_dates(today)
 
     def showing_html(time_, title, rating):
         is_new = title.lower() in new_releases_lower
@@ -357,22 +397,34 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
             f'<span class="title">{html.escape(title)}</span>{rating_html}</div>'
         )
 
-    def day_cell_html(day_key, cinema_name):
-        showings = day_grid[day_key][cinema_name]
+    def period_cell_html(day_key, cinema_name, period_key):
+        showings = [
+            s for s in day_grid[day_key][cinema_name] if period_of(s[0]) == period_key
+        ]
         if not showings:
-            return '<div class="empty">no listings</div>'
+            return '<div class="empty">—</div>'
         return "".join(showing_html(t, title, rating) for t, title, rating in showings)
 
     cinema_columns = "".join(
         f'<th>{html.escape(name)}</th>' for name, _ in CINEMAS
     )
+    n_cols = len(CINEMAS) + 1
 
     day_rows_html = ""
     for day_key, day_label in DISPLAY_DAY_ORDER:
-        cells = "".join(
-            f'<td>{day_cell_html(day_key, name)}</td>' for name, _ in CINEMAS
+        date_str = day_dates[day_key].strftime("%-d %B")
+        day_rows_html += (
+            f'<tr class="day-divider"><th colspan="{n_cols}">'
+            f'{day_label}, {date_str}</th></tr>'
         )
-        day_rows_html += f'<tr><th class="day-head" scope="row">{day_label}</th>{cells}</tr>'
+        for period_key, period_label, _start, _end in TIME_PERIODS:
+            cells = "".join(
+                f'<td>{period_cell_html(day_key, name, period_key)}</td>'
+                for name, _ in CINEMAS
+            )
+            day_rows_html += (
+                f'<tr><th class="period-head" scope="row">{period_label}</th>{cells}</tr>'
+            )
 
     new_release_items = "".join(
         f'<li><a href="{rt_search_url(t)}" target="_blank" rel="noopener">'
@@ -410,10 +462,12 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   th, td {{ border: 1px solid #333; vertical-align: top; padding: 8px;
            width: {100/(len(CINEMAS)+1):.2f}%; }}
   th {{ background: #1b1b1b; font-size: 0.8rem; }}
-  th.day-head {{ position: sticky; left: 0; background: #1b1b1b; width: 70px;
-                text-transform: uppercase; color: #ffcc02; font-size: 0.75rem; }}
+  th.period-head {{ position: sticky; left: 0; background: #1b1b1b; width: 90px;
+                    text-transform: uppercase; color: #ffcc02; font-size: 0.7rem; }}
+  tr.day-divider th {{ background: #24240a; color: #ffcc02; font-size: 0.9rem;
+                       text-align: left; padding: 10px 8px; border-top: 2px solid #ffcc02; }}
   thead th {{ position: sticky; top: 0; z-index: 2; }}
-  thead th.day-head {{ z-index: 3; }}
+  thead th.period-head {{ z-index: 3; }}
   .showing {{ border-bottom: 1px solid #292929; padding: 5px 0; }}
   .showing:last-child {{ border-bottom: none; }}
   .showing.new-release {{ background: rgba(255, 204, 2, 0.08); border-left: 3px solid #ffcc02; padding-left: 6px; }}
@@ -450,7 +504,7 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   <section>
     <h2>🗓️ Full program by day</h2>
     <table>
-      <thead><tr><th class="day-head">Day</th>{cinema_columns}</tr></thead>
+      <thead><tr><th class="period-head">Time</th>{cinema_columns}</tr></thead>
       <tbody>{day_rows_html}</tbody>
     </table>
   </section>
