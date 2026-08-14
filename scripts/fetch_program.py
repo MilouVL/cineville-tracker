@@ -16,6 +16,7 @@ import re
 import json
 import html
 import datetime
+import urllib.parse
 from pathlib import Path
 
 import requests
@@ -42,10 +43,8 @@ CINEMAS = [
     ("Filmhallen", "Filmhallen"),
     ("Rialto De Pijp", "Rialto De Pijp"),
     ("Cinecenter", "Cinecenter"),
-    ("Melkweg Cinema", "Melkweg Cinema"),
     ("Cinema De Balie", "De Balie"),
     ("De Uitkijk", "De Uitkijk"),
-    ("Filmhuis Cavia", "Filmhuis Cavia"),
     ("Het Ketelhuis", "Het Ketelhuis"),
     ("Kriterion", "Kriterion"),
     ("The Movies", "The Movies"),
@@ -66,7 +65,21 @@ ALL_AMSTERDAM_CINEMA_HEADERS = [
     "Rialto De Pijp", "Rialto VU", "Studio/K", "The Movies", "Vue Amsterdam",
 ]
 
-DAY_LABELS = ["do", "vr", "za", "zo", "ma", "di", "wo"]  # Thu..Wed
+DAY_LABELS = ["do", "vr", "za", "zo", "ma", "di", "wo"]  # Thu..Wed (parsing order)
+
+# Display order: Monday first, as requested, rather than the Thu-Wed
+# "speelweek" order the data is parsed in. (key, English label)
+DISPLAY_DAY_ORDER = [
+    ("ma", "Monday"),
+    ("di", "Tuesday"),
+    ("wo", "Wednesday"),
+    ("do", "Thursday"),
+    ("vr", "Friday"),
+    ("za", "Saturday"),
+    ("zo", "Sunday"),
+]
+
+ROTTEN_TOMATOES_SEARCH_URL = "https://www.rottentomatoes.com/search?search={query}"
 
 DUTCH_MONTHS = {
     "januari": 1, "februari": 2, "maart": 3, "april": 4, "mei": 5,
@@ -283,41 +296,64 @@ def get_upcoming_releases(weeks_ahead: int = 3, today: datetime.date = None) -> 
 # HTML rendering
 # ----------------------------------------------------------------------------
 
+def rt_search_url(title: str) -> str:
+    """Rotten Tomatoes doesn't have a guessable direct movie-page URL (the
+    slug format isn't consistent, e.g. /m/title_year vs /m/title), so this
+    links to a live RT search for the title instead -- one click from the
+    real page, and it never 404s the way a guessed direct link could."""
+    return ROTTEN_TOMATOES_SEARCH_URL.format(query=urllib.parse.quote(title))
+
+
+def build_day_grid(program: dict) -> dict:
+    """Reshape {cinema: [film entries...]} into
+    {day_key: {cinema_name: [(time, title, rating), ...sorted by time]}}."""
+    grid = {key: {name: [] for name, _ in CINEMAS} for key, _ in DISPLAY_DAY_ORDER}
+    for cinema_name, entries in program.items():
+        for e in entries:
+            for day_key, _ in DISPLAY_DAY_ORDER:
+                for t in e["days"].get(day_key, []):
+                    grid[day_key][cinema_name].append((t, e["title"], e["rating"]))
+    for day_key in grid:
+        for cinema_name in grid[day_key]:
+            grid[day_key][cinema_name].sort(key=lambda x: x[0])
+    return grid
+
+
 def render_html(program: dict, new_releases: list, upcoming: list, generated_at: str) -> str:
     new_releases_lower = {t.lower() for t in new_releases}
+    day_grid = build_day_grid(program)
 
-    def cell_html(entries):
-        if not entries:
+    def showing_html(time_, title, rating):
+        is_new = title.lower() in new_releases_lower
+        css = "showing new-release" if is_new else "showing"
+        badge = '<span class="badge">NEW</span>' if is_new else ""
+        rating_html = f'<span class="rating">{rating}&#9733;</span>' if rating else ""
+        return (
+            f'<div class="{css}">{badge}<span class="time">{time_}</span> '
+            f'<span class="title">{html.escape(title)}</span>{rating_html}</div>'
+        )
+
+    def day_cell_html(day_key, cinema_name):
+        showings = day_grid[day_key][cinema_name]
+        if not showings:
             return '<div class="empty">no listings</div>'
-        parts = []
-        for e in entries:
-            is_new = e["title"].lower() in new_releases_lower
-            css = "film new-release" if is_new else "film"
-            badge = '<span class="badge">NEW</span>' if is_new else ""
-            day_rows = []
-            for label in DAY_LABELS:
-                times = e["days"].get(label, [])
-                if times:
-                    day_rows.append(
-                        f'<div class="day-row"><span class="day">{label}</span>'
-                        f'<span class="times">{" ".join(times)}</span></div>'
-                    )
-            rating = f'<span class="rating">{e["rating"]}&#9733;</span>' if e["rating"] else ""
-            parts.append(
-                f'<div class="{css}">{badge}<div class="title">{html.escape(e["title"])} '
-                f'{rating}</div><div class="times-block">{"".join(day_rows)}</div></div>'
-            )
-        return "".join(parts)
+        return "".join(showing_html(t, title, rating) for t, title, rating in showings)
 
     cinema_columns = "".join(
         f'<th>{html.escape(name)}</th>' for name, _ in CINEMAS
     )
-    cinema_cells = "".join(
-        f'<td>{cell_html(program.get(name, []))}</td>' for name, _ in CINEMAS
-    )
+
+    day_rows_html = ""
+    for day_key, day_label in DISPLAY_DAY_ORDER:
+        cells = "".join(
+            f'<td>{day_cell_html(day_key, name)}</td>' for name, _ in CINEMAS
+        )
+        day_rows_html += f'<tr><th class="day-head" scope="row">{day_label}</th>{cells}</tr>'
 
     new_release_items = "".join(
-        f'<li>{html.escape(t)}</li>' for t in new_releases
+        f'<li><a href="{rt_search_url(t)}" target="_blank" rel="noopener">'
+        f'{html.escape(t)}</a> <span class="rt-hint">(Rotten Tomatoes ↗)</span></li>'
+        for t in new_releases
     ) or "<li><em>none detected this week</em></li>"
 
     # group upcoming by week_label, preserving order
@@ -347,36 +383,37 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   h1 {{ font-size: 1.4rem; margin-bottom: 0; }}
   .meta {{ color: #888; font-size: 0.85rem; margin-bottom: 24px; }}
   table {{ border-collapse: collapse; width: 100%; table-layout: fixed; }}
-  th, td {{ border: 1px solid #333; vertical-align: top; padding: 8px; width: {100/len(CINEMAS):.2f}%; }}
-  th {{ background: #1b1b1b; position: sticky; top: 0; font-size: 0.8rem; }}
-  .film {{ border-bottom: 1px solid #292929; padding: 6px 0; position: relative; }}
-  .film:last-child {{ border-bottom: none; }}
-  .film.new-release {{ background: rgba(255, 204, 2, 0.08); border-left: 3px solid #ffcc02; padding-left: 6px; }}
+  th, td {{ border: 1px solid #333; vertical-align: top; padding: 8px;
+           width: {100/(len(CINEMAS)+1):.2f}%; }}
+  th {{ background: #1b1b1b; font-size: 0.8rem; }}
+  th.day-head {{ position: sticky; left: 0; background: #1b1b1b; width: 70px;
+                text-transform: uppercase; color: #ffcc02; font-size: 0.75rem; }}
+  thead th {{ position: sticky; top: 0; z-index: 2; }}
+  thead th.day-head {{ z-index: 3; }}
+  .showing {{ border-bottom: 1px solid #292929; padding: 5px 0; }}
+  .showing:last-child {{ border-bottom: none; }}
+  .showing.new-release {{ background: rgba(255, 204, 2, 0.08); border-left: 3px solid #ffcc02; padding-left: 6px; }}
   .badge {{ display: inline-block; background: #ffcc02; color: #111; font-size: 0.6rem;
            font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }}
-  .title {{ font-size: 0.78rem; font-weight: 600; margin-bottom: 3px; }}
-  .rating {{ color: #ffcc02; font-weight: 400; font-size: 0.7rem; }}
-  .times-block {{ font-size: 0.68rem; color: #bbb; }}
-  .day-row {{ display: flex; gap: 6px; }}
-  .day {{ text-transform: uppercase; color: #777; width: 18px; flex-shrink: 0; }}
+  .time {{ font-weight: 700; font-size: 0.75rem; color: #ffcc02; }}
+  .title {{ font-size: 0.75rem; }}
+  .rating {{ color: #ffcc02; font-weight: 400; font-size: 0.68rem; margin-left: 4px; }}
   .empty {{ color: #555; font-style: italic; font-size: 0.75rem; }}
-  section {{ margin-top: 36px; }}
+  section {{ margin-bottom: 36px; }}
   section h2 {{ font-size: 1.1rem; border-bottom: 1px solid #333; padding-bottom: 6px; }}
-  ul {{ font-size: 0.85rem; line-height: 1.6; }}
+  ul {{ font-size: 0.85rem; line-height: 1.8; padding-left: 20px; }}
   .conf {{ color: #6fd66f; font-size: 0.75rem; }}
   .unconf {{ color: #888; font-size: 0.75rem; }}
+  #new-releases a {{ color: #ffcc02; font-weight: 600; text-decoration: none; }}
+  #new-releases a:hover {{ text-decoration: underline; }}
+  .rt-hint {{ color: #777; font-size: 0.75rem; font-weight: 400; }}
 </style>
 </head>
 <body>
   <h1>🎬 Cineville Amsterdam — Weekly Program</h1>
   <div class="meta">Generated {html.escape(generated_at)} · source: filmladder.nl · cinemas ordered by proximity to 1075&nbsp;TR</div>
 
-  <table>
-    <thead><tr>{cinema_columns}</tr></thead>
-    <tbody><tr>{cinema_cells}</tr></tbody>
-  </table>
-
-  <section>
+  <section id="new-releases">
     <h2>🌟 New releases this week</h2>
     <ul>{new_release_items}</ul>
   </section>
@@ -384,6 +421,14 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   <section>
     <h2>📅 Announced for the next 3 weeks</h2>
     {upcoming_html or "<p>Nothing found.</p>"}
+  </section>
+
+  <section>
+    <h2>🗓️ Full program by day</h2>
+    <table>
+      <thead><tr><th class="day-head">Day</th>{cinema_columns}</tr></thead>
+      <tbody>{day_rows_html}</tbody>
+    </table>
   </section>
 </body>
 </html>
