@@ -6,8 +6,13 @@ ordered by proximity to postcode 1075 TR, with new releases highlighted and
 an "announced for the next 3 weeks" section.
 
 **Cinemas covered:** Rialto VU, LAB111, Filmhallen, Rialto De Pijp,
-Cinecenter, Melkweg Cinema, Cinema De Balie, De Uitkijk, Filmhuis Cavia,
-Het Ketelhuis, Kriterion, The Movies, EYE Filmmuseum, Studio/K.
+Cinecenter, Cinema De Balie, De Uitkijk, Het Ketelhuis, Kriterion,
+The Movies, EYE Filmmuseum, Studio/K.
+
+**Page layout:** new releases (with a Rotten Tomatoes search link for each)
+are listed first, then what's announced for the next 3 weeks, then the full
+program as a table with one row per day (Monday → Sunday) and one column
+per cinema, each cell showing exact start times.
 
 **Data source:** [filmladder.nl](https://www.filmladder.nl) — Cineville
 doesn't publish a public API, and filmladder.nl is the most consistent single
@@ -80,6 +85,11 @@ updated `docs/index.html` and `data/latest.json`, and redeploys the site.
   to release, so early entries may not yet say "Amsterdam" explicitly even
   if they'll eventually play here. The page marks each entry as either
   "Amsterdam confirmed" or "city list TBA" so you can tell which is which.
+- **Rotten Tomatoes links go to a search results page, not the movie page
+  directly.** RT's URL slugs (`/m/title_year` vs `/m/title`, etc.) aren't
+  consistent enough to construct reliably, so each new release links to
+  `rottentomatoes.com/search?search=<title>` instead — one click from the
+  real page, and it won't ever 404 the way a guessed direct link could.
 - **New-release highlighting** is based on filmladder's site-wide premiere
   list, then matched against each cinema's own listings — a title has to
   match exactly, so a minor formatting difference (e.g. a subtitle or
