@@ -1,13 +1,22 @@
-name: Weekly Cineville Amsterdam program
+name: Cineville Amsterdam program
 
 on:
   schedule:
-    # Tuesday 12:00 Europe/Amsterdam, split into two cron lines because
-    # GitHub Actions cron runs in UTC and Amsterdam alternates between
-    # CET (UTC+1) and CEST (UTC+2). This is a ~1-week-either-side
-    # approximation around the actual DST changeover dates -- see README.
-    - cron: "0 10 * 3-10 2"   # CEST months (roughly late Mar - late Oct): 10:00 UTC = 12:00 CEST
-    - cron: "0 11 * 1,2,11,12 2"  # CET months (roughly late Oct - late Mar): 11:00 UTC = 12:00 CET
+    # Tuesday AND Thursday, 12:00 Europe/Amsterdam. Tuesday is a
+    # cinema-decides-internally checkpoint (schedules are typically
+    # finalized the day before, Monday evening), while Thursday is when
+    # the new week actually goes live on filmladder.nl (the site this
+    # scrapes only ever shows the CURRENTLY active Thu-Wed week, not a
+    # preview of the upcoming one) -- so Thursday's run is the one that
+    # reliably picks up the new week's data; Tuesday's mostly reconfirms
+    # the outgoing week, though it can still catch late schedule tweaks.
+    #
+    # Split into two cron lines per weekday-set because GitHub Actions
+    # cron runs in UTC and Amsterdam alternates between CET (UTC+1) and
+    # CEST (UTC+2) -- this is a ~1-week-either-side approximation around
+    # the actual DST changeover dates -- see README.
+    - cron: "0 10 * 3-10 2,4"   # CEST months (roughly late Mar - late Oct): 10:00 UTC = 12:00 CEST
+    - cron: "0 11 * 1,2,11,12 2,4"  # CET months (roughly late Oct - late Mar): 11:00 UTC = 12:00 CET
   workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
 
 permissions:

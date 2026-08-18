@@ -1,7 +1,7 @@
 # Cineville Amsterdam — Weekly Program Tracker
 
-Automatically builds a webpage every Tuesday around 12:00 (Europe/Amsterdam)
-showing the new film program for 14 Cineville-affiliated Amsterdam cinemas,
+Automatically builds a webpage every Tuesday and Thursday around 12:00
+(Europe/Amsterdam) showing the film program for 14 Cineville-affiliated Amsterdam cinemas,
 ordered by proximity to postcode 1075 TR, with new releases highlighted and
 an "announced for the next 3 weeks" section.
 
@@ -40,17 +40,22 @@ source that lists showtimes for all of these venues in one place, plus a
    manually — the workflow deploys directly.)
 
 3. **Run it once manually** to generate the first version instead of waiting
-   for Tuesday: Repo → **Actions** tab → select **"Weekly Cineville Amsterdam
-   program"** → **Run workflow**. After it finishes (~1 minute), your page
-   will be live at:
+   for it instead of waiting: Repo → **Actions** tab → select **"Cineville
+   Amsterdam program"** → **Run workflow**. After it finishes (~1 minute),
+   your page will be live at:
    ```
    https://<your-username>.github.io/<repo-name>/
    ```
-   Bookmark that URL — that's the page you check every Tuesday.
+   Bookmark that URL — that's the page you check.
 
-That's it. From here it runs itself: every Tuesday around 12:00 Amsterdam
-time, the Action re-scrapes filmladder.nl, rebuilds the page, commits the
-updated `docs/index.html` and `data/latest.json`, and redeploys the site.
+That's it. From here it runs itself: every Tuesday and Thursday around
+12:00 Amsterdam time, the Action re-scrapes filmladder.nl, rebuilds the
+page, commits the updated `docs/index.html` and `data/latest.json`, and
+redeploys the site. Thursday's run is the one that reliably catches the new
+week — filmladder.nl only ever shows the currently active week, so it
+doesn't reflect the new schedule until the new week actually starts.
+Tuesday's run mostly reconfirms the outgoing week, though it can still
+catch late schedule changes.
 
 ## How it works
 
