@@ -87,7 +87,13 @@ catch late schedule changes.
   read "vandaag vr, morgen za, zondag zo, ..." instead. (This broke the
   tracker the first time it ran on a day other than Thursday — every cell
   showed "no listings" — before the parser was changed to key off the
-  reliable 2-letter abbreviation instead of the rotating Dutch word.)
+  reliable 2-letter abbreviation instead of the rotating Dutch word. A
+  second, related bug showed up later: the regex only recognized 6 of the 7
+  possible absolute weekday names — "vrijdag" was missing — so on a run
+  where Friday was neither "today" nor "tomorrow", that one day-field
+  failed to match and desynced parsing for every film after it, producing
+  garbled titles like "vrijdag vr" and an empty Friday column. Fixed by
+  listing all 7 Dutch weekday names.)
 - **The schedule is a DST approximation.** GitHub Actions cron runs in UTC,
   and Amsterdam shifts between UTC+1 (winter) and UTC+2 (summer). The
   workflow uses two cron lines split roughly at the DST changeover months,
