@@ -141,8 +141,16 @@ _TIME_FIELD = r"(?:(?:\d{1,2}:\d{2}|\.\.\.)\s*)*"
 # always reliable -- it always means Thu/Fri/Sat/Sun/Mon/Tue/Wed regardless
 # of which Dutch word precedes it or what order the 7 columns come in -- so
 # that's what parsing keys off instead.
+#
+# The word list below has to cover ALL 7 possible absolute weekday names,
+# not just the ones observed in one sample fetch -- any of the 7 (not just
+# "zaterdag"/"donderdag") can show up as the absolute label depending on
+# which 2 days are "today"/"tomorrow" on a given run. (An earlier version
+# of this list omitted "vrijdag" and broke parsing on any run where Friday
+# wasn't today or tomorrow -- every weekday name must be present here.)
 _RELATIVE_DAY_WORD = (
-    r"(?:vandaag|morgen|zaterdag|zondag|maandag|dinsdag|woensdag|donderdag)"
+    r"(?:vandaag|morgen"
+    r"|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)"
 )
 
 ONE_DAY_FIELD_RE = re.compile(
