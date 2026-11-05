@@ -14,7 +14,11 @@ are listed first, then what's announced for the next 3 weeks, then the full
 program as a table with one column per cinema. Each day gets its own
 labeled section (e.g. "Monday, 17 August") with three rows underneath —
 Morning (before 12:00), Afternoon (12:00–18:00), and Evening (after
-18:00) — each showing exact start times.
+18:00) — each showing exact start times. Above the table are two
+dropdown filters, one for day and one for part of the day, each with
+multiple tickable options (plus "Select all" / "Clear"); everything is
+shown by default. The filtering runs in the browser, so it needs no
+changes to the workflow.
 
 **Data source:** [filmladder.nl](https://www.filmladder.nl) — Cineville
 doesn't publish a public API, and filmladder.nl is the most consistent single

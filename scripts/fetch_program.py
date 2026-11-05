@@ -364,6 +364,62 @@ def get_upcoming_releases(weeks_ahead: int = 3, today: datetime.date = None) -> 
 # HTML rendering
 # ----------------------------------------------------------------------------
 
+FILTER_JS = """
+(function () {
+  var dayDD = document.getElementById('filter-day');
+  var perDD = document.getElementById('filter-period');
+  var rows = document.querySelectorAll('tbody tr');
+  var noMatch = document.getElementById('no-match');
+
+  function checked(dd) {
+    return Array.prototype.map.call(
+      dd.querySelectorAll('input:checked'), function (i) { return i.value; });
+  }
+  function label(dd) {
+    var total = dd.querySelectorAll('input').length;
+    var n = checked(dd).length;
+    var name = dd.getAttribute('data-label');
+    return n === total ? name + ': all' : n === 0 ? name + ': none' : name + ': ' + n + ' selected';
+  }
+  function apply() {
+    var days = checked(dayDD), pers = checked(perDD), any = false;
+    Array.prototype.forEach.call(rows, function (r) {
+      var dayOk = days.indexOf(r.getAttribute('data-day')) !== -1;
+      var perAttr = r.getAttribute('data-period');
+      var show = dayOk && pers.length > 0 && (perAttr === null || pers.indexOf(perAttr) !== -1);
+      r.style.display = show ? '' : 'none';
+      if (show) any = true;
+    });
+    noMatch.style.display = any ? 'none' : 'block';
+    dayDD.querySelector('.dd-btn').textContent = label(dayDD);
+    perDD.querySelector('.dd-btn').textContent = label(perDD);
+  }
+  [dayDD, perDD].forEach(function (dd) {
+    dd.querySelector('.dd-btn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var wasOpen = dd.classList.contains('open');
+      dayDD.classList.remove('open'); perDD.classList.remove('open');
+      if (!wasOpen) dd.classList.add('open');
+    });
+    dd.querySelector('.dd-panel').addEventListener('click', function (e) { e.stopPropagation(); });
+    dd.addEventListener('change', apply);
+    Array.prototype.forEach.call(dd.querySelectorAll('[data-act]'), function (a) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        var on = a.getAttribute('data-act') === 'all';
+        Array.prototype.forEach.call(dd.querySelectorAll('input'), function (i) { i.checked = on; });
+        apply();
+      });
+    });
+  });
+  document.addEventListener('click', function () {
+    dayDD.classList.remove('open'); perDD.classList.remove('open');
+  });
+  apply();
+})();
+"""
+
+
 def rt_search_url(title: str) -> str:
     """Rotten Tomatoes doesn't have a guessable direct movie-page URL (the
     slug format isn't consistent, e.g. /m/title_year vs /m/title), so this
@@ -422,7 +478,7 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
     for day_key, day_label in DISPLAY_DAY_ORDER:
         date_str = day_dates[day_key].strftime("%-d %B")
         day_rows_html += (
-            f'<tr class="day-divider"><th colspan="{n_cols}">'
+            f'<tr class="day-divider" data-day="{day_key}"><th colspan="{n_cols}">'
             f'{day_label}, {date_str}</th></tr>'
         )
         for period_key, period_label, _start, _end in TIME_PERIODS:
@@ -431,8 +487,35 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
                 for name, _ in CINEMAS
             )
             day_rows_html += (
-                f'<tr><th class="period-head" scope="row">{period_label}</th>{cells}</tr>'
+                f'<tr class="period-row" data-day="{day_key}" data-period="{period_key}">'
+                f'<th class="period-head" scope="row">{period_label}</th>{cells}</tr>'
             )
+
+    def filter_dropdown(filter_id, label, options):
+        items = "".join(
+            f'<label class="opt"><input type="checkbox" value="{value}" checked> '
+            f'{html.escape(text)}</label>'
+            for value, text in options
+        )
+        return (
+            f'<div class="dd" id="{filter_id}" data-label="{label}">'
+            f'<button type="button" class="dd-btn"></button>'
+            f'<div class="dd-panel">'
+            f'<div class="dd-actions"><a href="#" data-act="all">Select all</a>'
+            f' · <a href="#" data-act="none">Clear</a></div>{items}</div></div>'
+        )
+
+    day_options = [
+        (key, f"{label}, {day_dates[key].strftime('%-d %B')}")
+        for key, label in DISPLAY_DAY_ORDER
+    ]
+    period_options = [(key, label) for key, label, _s, _e in TIME_PERIODS]
+    filter_bar_html = (
+        '<div class="filters">'
+        + filter_dropdown("filter-day", "Day", day_options)
+        + filter_dropdown("filter-period", "Part of day", period_options)
+        + '</div>'
+    )
 
     new_release_items = "".join(
         f'<li><a href="{rt_search_url(t)}" target="_blank" rel="noopener">'
@@ -493,6 +576,21 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   #new-releases a {{ color: #ffcc02; font-weight: 600; text-decoration: none; }}
   #new-releases a:hover {{ text-decoration: underline; }}
   .rt-hint {{ color: #777; font-size: 0.75rem; font-weight: 400; }}
+  .filters {{ display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }}
+  .dd {{ position: relative; }}
+  .dd-btn {{ background: #1b1b1b; color: #eee; border: 1px solid #444; border-radius: 6px;
+            padding: 8px 14px; font-size: 0.85rem; cursor: pointer; min-width: 170px; text-align: left; }}
+  .dd-btn::after {{ content: "\25BE"; float: right; margin-left: 10px; color: #ffcc02; }}
+  .dd-btn:hover {{ border-color: #ffcc02; }}
+  .dd-panel {{ display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 10;
+              background: #1b1b1b; border: 1px solid #444; border-radius: 6px;
+              padding: 8px 12px; min-width: 220px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }}
+  .dd.open .dd-panel {{ display: block; }}
+  .dd-actions {{ font-size: 0.75rem; margin-bottom: 6px; color: #777; }}
+  .dd-actions a {{ color: #ffcc02; text-decoration: none; }}
+  .opt {{ display: block; padding: 4px 0; font-size: 0.85rem; cursor: pointer; }}
+  .opt input {{ accent-color: #ffcc02; margin-right: 6px; }}
+  .no-match {{ color: #888; font-style: italic; padding: 16px 0; display: none; }}
 </style>
 </head>
 <body>
@@ -511,11 +609,14 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
 
   <section>
     <h2>🗓️ Full program by day</h2>
+    {filter_bar_html}
+    <div class="no-match" id="no-match">Nothing selected — tick at least one day and one part of the day.</div>
     <table>
       <thead><tr><th class="period-head">Time</th>{cinema_columns}</tr></thead>
       <tbody>{day_rows_html}</tbody>
     </table>
   </section>
+<script>{FILTER_JS}</script>
 </body>
 </html>
 """
