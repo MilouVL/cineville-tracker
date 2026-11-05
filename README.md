@@ -2,16 +2,14 @@
 
 Automatically builds a webpage every Tuesday and Thursday around 12:00
 (Europe/Amsterdam) showing the film program for 14 Cineville-affiliated Amsterdam cinemas,
-ordered by proximity to postcode 1075 TR, with new releases highlighted and
-an "announced for the next 3 weeks" section.
+ordered by proximity to postcode 1075 TR, with new releases highlighted.
 
 **Cinemas covered:** Rialto VU, LAB111, Filmhallen, Rialto De Pijp,
 Cinecenter, Cinema De Balie, De Uitkijk, Het Ketelhuis, Kriterion,
 The Movies, EYE Filmmuseum, Studio/K.
 
 **Page layout:** new releases (with a Rotten Tomatoes search link for each)
-are listed first, then what's announced for the next 3 weeks, then the full
-program as a table with one column per cinema. Each day gets its own
+are listed first, then the full program as a table with one column per cinema. Each day gets its own
 labeled section (e.g. "Monday, 17 August") with three rows underneath —
 Morning (before 12:00), Afternoon (12:00–18:00), and Evening (after
 18:00) — each showing exact start times. Above the table are two
@@ -65,10 +63,9 @@ catch late schedule changes.
 
 - `scripts/fetch_program.py` fetches:
   - `filmladder.nl/amsterdam/bioscopen` for this week's full showtimes per
-    cinema, and the site-wide "films deze week in première" (new releases
-    this week) list.
-  - `filmladder.nl/films/verwacht` for films announced in upcoming weeks,
-    filtered to the next 3 weeks from run date.
+    cinema.
+  - `filmladder.nl/films/verwacht` for the site-wide "films deze week in
+    première" (new releases this week) list.
 - It renders everything into `docs/index.html` (dark theme, one column per
   cinema, new releases highlighted with a yellow "NEW" badge and left
   border).
@@ -107,11 +104,6 @@ catch late schedule changes.
   runs can be delayed by a few minutes (occasionally more) during periods of
   high platform load — this is a GitHub-wide limitation, not something this
   workflow controls.
-- **"Announced for the next 3 weeks"** reflects whatever filmladder.nl has
-  published so far — distributors often confirm cinemas city-by-city closer
-  to release, so early entries may not yet say "Amsterdam" explicitly even
-  if they'll eventually play here. The page marks each entry as either
-  "Amsterdam confirmed" or "city list TBA" so you can tell which is which.
 - **Rotten Tomatoes links go to a search results page, not the movie page
   directly.** RT's URL slugs (`/m/title_year` vs `/m/title`, etc.) aren't
   consistent enough to construct reliably, so each new release links to

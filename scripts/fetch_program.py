@@ -117,12 +117,6 @@ def period_of(time_str: str) -> str:
 
 ROTTEN_TOMATOES_SEARCH_URL = "https://www.rottentomatoes.com/search?search={query}"
 
-DUTCH_MONTHS = {
-    "januari": 1, "februari": 2, "maart": 3, "april": 4, "mei": 5,
-    "juni": 6, "juli": 7, "augustus": 8, "september": 9,
-    "oktober": 10, "november": 11, "december": 12,
-}
-
 # A "day field" is a run of HH:MM tokens and/or literal "..." placeholders
 # (filmladder shows "..." for a day with no showing).
 _TIME_FIELD = r"(?:(?:\d{1,2}:\d{2}|\.\.\.)\s*)*"
@@ -282,85 +276,6 @@ def get_new_releases_this_week() -> list:
 
 
 # ----------------------------------------------------------------------------
-# Upcoming releases (next N weeks) from the "verwacht" page
-# ----------------------------------------------------------------------------
-
-WEEK_HEADER_RE = re.compile(
-    r"(\d{1,2})\s+(\w+)\s+t/m\s+(\d{1,2})\s+(\w+)", re.IGNORECASE
-)
-
-
-def parse_dutch_date(day: str, month_name: str, ref_year: int) -> datetime.date | None:
-    month = DUTCH_MONTHS.get(month_name.lower())
-    if not month:
-        return None
-    return datetime.date(ref_year, month, int(day))
-
-
-def get_upcoming_releases(weeks_ahead: int = 3, today: datetime.date = None) -> list:
-    if today is None:
-        today = datetime.date.today()
-    cutoff = today + datetime.timedelta(weeks=weeks_ahead)
-
-    soup = BeautifulSoup(fetch(VERWACHT_URL), "html.parser")
-
-    # Walk every tag in DOCUMENT ORDER (not just direct siblings of the
-    # "Verwachte films" heading) so this still works if the site wraps
-    # headings/lists in extra container divs -- a sibling-only walk breaks
-    # the moment a wrapper element is inserted between them, which is a
-    # common source of silent zero-results bugs on scraped sites.
-    results = []
-    seen_main_heading = False
-    current_week_label = None
-    current_week_start = None
-    STOP_MARKERS = ("steden met bioscopen", "filmladder missie", "\u00a9 filmladder")
-
-    for tag in soup.find_all(True):
-        if tag.name not in ("h1", "h2", "h3", "h4", "p", "strong", "li"):
-            continue
-        text = tag.get_text(" ", strip=True)
-        if not text:
-            continue
-        low = text.lower()
-
-        if not seen_main_heading:
-            if tag.name in ("h1", "h2") and "verwachte films" in low:
-                seen_main_heading = True
-            continue
-
-        if any(marker in low for marker in STOP_MARKERS):
-            break
-
-        if tag.name in ("h1", "h2", "h3", "h4", "p", "strong"):
-            m = WEEK_HEADER_RE.search(text)
-            if m:
-                d1, mon1, d2, mon2 = m.groups()
-                start_date = parse_dutch_date(d1, mon1, today.year)
-                # handle year rollover (e.g. Dec -> Jan week straddling new year)
-                if start_date and start_date < today - datetime.timedelta(days=200):
-                    start_date = parse_dutch_date(d1, mon1, today.year + 1)
-                current_week_label = text
-                current_week_start = start_date
-            continue
-
-        if tag.name == "li" and current_week_start is not None:
-            if current_week_start > cutoff:
-                continue
-            a = tag.find("a")
-            if not a:
-                continue
-            title = a.get("title") or a.get_text(strip=True)
-            results.append({
-                "title": title,
-                "week_label": current_week_label,
-                "week_start": current_week_start.isoformat(),
-                "amsterdam_confirmed": "amsterdam" in low,
-            })
-
-    return results
-
-
-# ----------------------------------------------------------------------------
 # HTML rendering
 # ----------------------------------------------------------------------------
 
@@ -443,7 +358,7 @@ def build_day_grid(program: dict) -> dict:
     return grid
 
 
-def render_html(program: dict, new_releases: list, upcoming: list, generated_at: str,
+def render_html(program: dict, new_releases: list, generated_at: str,
                  today: datetime.date = None) -> str:
     if today is None:
         today = datetime.date.today()
@@ -523,21 +438,6 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
         for t in new_releases
     ) or "<li><em>none detected this week</em></li>"
 
-    # group upcoming by week_label, preserving order
-    upcoming_by_week = {}
-    for item in upcoming:
-        upcoming_by_week.setdefault(item["week_label"], []).append(item)
-
-    upcoming_html = ""
-    for week_label, items in upcoming_by_week.items():
-        rows = "".join(
-            f'<li>{html.escape(it["title"])}'
-            + (" <span class=\"conf\">(Amsterdam confirmed)</span>" if it["amsterdam_confirmed"] else " <span class=\"unconf\">(city list TBA)</span>")
-            + "</li>"
-            for it in items
-        )
-        upcoming_html += f'<h3>{html.escape(week_label)}</h3><ul>{rows}</ul>'
-
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -571,8 +471,6 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   section {{ margin-bottom: 36px; }}
   section h2 {{ font-size: 1.1rem; border-bottom: 1px solid #333; padding-bottom: 6px; }}
   ul {{ font-size: 0.85rem; line-height: 1.8; padding-left: 20px; }}
-  .conf {{ color: #6fd66f; font-size: 0.75rem; }}
-  .unconf {{ color: #888; font-size: 0.75rem; }}
   #new-releases a {{ color: #ffcc02; font-weight: 600; text-decoration: none; }}
   #new-releases a:hover {{ text-decoration: underline; }}
   .rt-hint {{ color: #777; font-size: 0.75rem; font-weight: 400; }}
@@ -580,7 +478,7 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   .dd {{ position: relative; }}
   .dd-btn {{ background: #1b1b1b; color: #eee; border: 1px solid #444; border-radius: 6px;
             padding: 8px 14px; font-size: 0.85rem; cursor: pointer; min-width: 170px; text-align: left; }}
-  .dd-btn::after {{ content: "\25BE"; float: right; margin-left: 10px; color: #ffcc02; }}
+  .dd-btn::after {{ content: "▾"; float: right; margin-left: 10px; color: #ffcc02; }}
   .dd-btn:hover {{ border-color: #ffcc02; }}
   .dd-panel {{ display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 10;
               background: #1b1b1b; border: 1px solid #444; border-radius: 6px;
@@ -600,11 +498,6 @@ def render_html(program: dict, new_releases: list, upcoming: list, generated_at:
   <section id="new-releases">
     <h2>🌟 New releases this week</h2>
     <ul>{new_release_items}</ul>
-  </section>
-
-  <section>
-    <h2>📅 Announced for the next 3 weeks</h2>
-    {upcoming_html or "<p>Nothing found.</p>"}
   </section>
 
   <section>
@@ -631,9 +524,8 @@ def main():
 
     program = get_this_week_program()
     new_releases = get_new_releases_this_week()
-    upcoming = get_upcoming_releases(weeks_ahead=3)
 
-    out_html = render_html(program, new_releases, upcoming, generated_at)
+    out_html = render_html(program, new_releases, generated_at)
 
     docs_dir = Path(__file__).resolve().parent.parent / "docs"
     docs_dir.mkdir(exist_ok=True)
@@ -645,7 +537,6 @@ def main():
         "generated_at": generated_at,
         "program": program,
         "new_releases": new_releases,
-        "upcoming": upcoming,
     }
     (data_dir / "latest.json").write_text(
         json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8"
